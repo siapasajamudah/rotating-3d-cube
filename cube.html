@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+
+<meta name="viewport"
+      content="width=device-width,
+               initial-scale=1.0,
+               maximum-scale=1.0,
+               user-scalable=no">
+
+<title>3D Point Cube</title>
+
+<style>
+
+/* ============================================================
+   GLOBAL
+   ============================================================ */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #000;
+}
+
+body {
+    position: fixed;
+    inset: 0;
+}
+
+canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+}
+
+
+/* ============================================================
+   FPS DISPLAY
+   ============================================================ */
+
+#fps {
+    position: fixed;
+
+    top: 7px;
+    left: 8px;
+
+    z-index: 100;
+
+    color: #fff;
+
+    font-family:
+        monospace,
+        "Courier New";
+
+    font-size: 12px;
+
+    line-height: 1;
+
+    pointer-events: none;
+
+    user-select: none;
+
+    text-shadow:
+        0 0 4px #000,
+        0 0 7px #000;
+}
+
+
+/* ============================================================
+   MINIMAL LEVEL CONTROL
+   ============================================================ */
+
+#controller {
+    position: fixed;
+
+    left: 50%;
+    bottom: 17px;
+
+    width: min(84vw, 430px);
+
+    transform:
+        translateX(-50%);
+
+    z-index: 100;
+
+    pointer-events: none;
+}
+
+
+/* ============================================================
+   LEVEL INDICATORS
+   ============================================================ */
+
+#levels {
+    display: flex;
+
+    align-items: center;
+    justify-content: space-between;
+
+    width: 100%;
+
+    margin-bottom: 5px;
+}
+
+.level {
+    position: relative;
+
+    width: 9px;
+    height: 9px;
+
+    border-radius: 50%;
+
+    background: #130000;
+
+    border: 1px solid #421010;
+
+    transition:
+        background 180ms linear,
+        border-color 180ms linear,
+        box-shadow 180ms linear,
+        transform 180ms linear;
+}
+
+.level.active {
+    transform: scale(1.5);
+}
+
+
+/* ============================================================
+   COUNTDOWN RING
+   ============================================================ */
+
+.level.countdown::after {
+    content: "";
+
+    position: absolute;
+
+    left: 50%;
+    top: 50%;
+
+    width: 17px;
+    height: 17px;
+
+    transform:
+        translate(-50%, -50%)
+        scale(1);
+
+    border-radius: 50%;
+
+    border: 1px solid rgba(255,255,255,.8);
+
+    animation:
+        countdownPulse 5s linear forwards;
+
+    pointer-events: none;
+}
+
+@keyframes countdownPulse {
+
+    0% {
+        transform:
+            translate(-50%, -50%)
+            scale(.35);
+
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 1;
+    }
+
+    100% {
+        transform:
+            translate(-50%, -50%)
+            scale(1.5);
+
+        opacity: 0;
+    }
+}
+
+
+/* ============================================================
+   SLIDER
+   ============================================================ */
+
+#slider {
+    display: block;
+
+    width: 100%;
+    height: 4px;
+
+    appearance: none;
+    -webkit-appearance: none;
+
+    border: 0;
+    outline: 0;
+
+    border-radius: 10px;
+
+    background:
+        rgba(255,255,255,.18);
+
+    pointer-events: auto;
+}
+
+
+/* ============================================================
+   SLIDER THUMB
+   ============================================================ */
+
+#slider::-webkit-slider-thumb {
+    appearance: none;
+    -webkit-appearance: none;
+
+    width: 18px;
+    height: 18px;
+
+    border-radius: 50%;
+
+    border: 2px solid #fff;
+
+    background: #fff;
+
+    box-shadow:
+        0 0 8px rgba(255,255,255,.75);
+}
+
+#slider::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+
+    border-radius: 50%;
+
+    border: 2px solid #fff;
+
+    background: #fff;
+
+    box-shadow:
+        0 0 8px rgba(255,255,255,.75);
+}
+
+</style>
+</head>
+
+<body>
+
+<!-- ==========================================================
+     CANVAS
+     ========================================================== -->
+
+<canvas id="canvas"></canvas>
+
+
+<!-- ==========================================================
+     REAL-TIME FPS
+     ========================================================== -->
+
+<div id="fps">
+    0 FPS
+</div>
+
+
+<!-- ==========================================================
+     LEVEL CONTROLLER
+     ========================================================== -->
+
+<div id="controller">
+
+    <div id="levels">
+
+        <span class="level"></span>
+        <span class="level"></span>
+        <span class="level"></span>
+        <span class="level"></span>
+        <span class="level"></span>
+        <span class="level"></span>
+        <span class="level"></span>
+
+    </div>
+
+    <input
+        id="slider"
+        type="range"
+        min="1"
+        max="7"
+        step="1"
+        value="1"
+    >
+
+</div>
+
+
+<script>
+
+"use strict";
+
+
+/* ============================================================
+   DOM REFERENCES
+   ============================================================ */
+
+const canvas =
+    document.getElementById("canvas");
+
+const ctx =
+    canvas.getContext(
+        "2d",
+        {
+            alpha: false,
+            desynchronized: true
+        }
+    );
+
+const fpsElement =
+    document.getElementById("fps");
+
+const slider =
+    document.getElementById("slider");
+
+const levelElements =
+    document.querySelectorAll(
+        ".level"
+    );
+
+
+/* ============================================================
+   CANVAS STATE
+   ============================================================ */
+
+let screenWidth = 0;
+let screenHeight = 0;
+
+let centerX = 0;
+let centerY = 0;
+
+let smallestDimension = 0;
+
+
+/* ============================================================
+   CANVAS RESIZE
+   ============================================================ */
+
+function resizeCanvas() {
+
+    screenWidth =
+        window.innerWidth;
+
+    screenHeight =
+        window.innerHeight;
+
+    canvas.width =
+        screenWidth;
+
+    canvas.height =
+        screenHeight;
+
+    centerX =
+        screenWidth * 0.5;
+
+    centerY =
+        screenHeight * 0.5;
+
+    smallestDimension =
+        Math.min(
+            screenWidth,
+            screenHeight
+        );
+}
+
+window.addEventListener(
+    "resize",
+    resizeCanvas,
+    {
+        passive: true
+    }
+);
+
+resizeCanvas();
+
+
+/* ============================================================
+   LEVEL CONFIGURATION
+   ============================================================ */
+
+/*
+   Level 1:
+   Sangat ringan untuk startup.
+
+   Level 7:
+   Stress test berat tetapi tetap dibatasi pada pekerjaan
+   JavaScript/Canvas. Tidak ada perintah untuk mematikan,
+   restart, atau merusak perangkat.
+*/
+
+const LEVEL_CONFIG = {
+
+    1: {
+        resolution: 16,
+        cpuPasses: 0,
+        drawPasses: 1
+    },
+
+    2: {
+        resolution: 28,
+        cpuPasses: 0,
+        drawPasses: 1
+    },
+
+    3: {
+        resolution: 42,
+        cpuPasses: 1,
+        drawPasses: 1
+    },
+
+    4: {
+        resolution: 62,
+        cpuPasses: 2,
+        drawPasses: 1
+    },
+
+    5: {
+        resolution: 85,
+        cpuPasses: 3,
+        drawPasses: 2
+    },
+
+    6: {
+        resolution: 115,
+        cpuPasses: 4,
+        drawPasses: 2
+    },
+
+    7: {
+        resolution: 150,
+        cpuPasses: 6,
+        drawPasses: 3
+    }
+
+};
+
+
+/* ============================================================
+   LEVEL COLOR SYSTEM
+   ============================================================ */
+
+const LEVEL_COLORS = [
+
+    "#5a1717",
+    "#6b1616",
+    "#7d1515",
+    "#8f1313",
+    "#a51212",
+    "#bd1010",
+    "#d00000"
+
+];
+
+
+/* ============================================================
+   CURRENT LEVEL STATE
+   ============================================================ */
+
+let currentLevel = 1;
+
+let pendingLevel = 1;
+
+let levelChanging = false;
+
+let levelTimer = null;
+
+
+/* ============================================================
+   CUBE PARAMETERS
+   ============================================================ */
+
+const cubeSize = 1.0;
+
+const cameraDistance = 2.4;
+
+const fixedXRotation =
+    45 * Math.PI / 180;
+
+let rotationY = 0;
+
+
+/* ============================================================
+   POINT STORAGE
+   ============================================================ */
+
+let points = [];
+
+let projectedPoints = [];
+
+
+/* ============================================================
+   CUBE GENERATOR
+   ============================================================ */
+
+function generateCubePoints(
+    size,
+    resolution
+) {
+
+    const generated = [];
+
+    const step =
+        (size * 2) /
+        resolution;
+
+
+    for (
+        let x = -size;
+        x <= size;
+        x += step
+    ) {
+
+        for (
+            let y = -size;
+            y <= size;
+            y += step
+        ) {
+
+            for (
+                let z = -size;
+                z <= size;
+                z += step
+            ) {
+
+                const surface =
+                    Math.abs(x) >=
+                        size - step ||
+
+                    Math.abs(y) >=
+                        size - step ||
+
+                    Math.abs(z) >=
+                        size - step;
+
+
+                if (surface) {
+
+                    generated.push({
+                        x: x,
+                        y: y,
+                        z: z
+                    });
+
+                }
+            }
+        }
+    }
+
+    return generated;
+}
+
+
+/* ============================================================
+   LOAD LEVEL DATA
+   ============================================================ */
+
+function loadLevelData(level) {
+
+    const config =
+        LEVEL_CONFIG[level];
+
+
+    points =
+        generateCubePoints(
+            cubeSize,
+            config.resolution
+        );
+
+
+    projectedPoints = [];
+
+}
+
+
+/* ============================================================
+   UPDATE LEVEL INDICATORS
+   ============================================================ */
+
+function updateLevelIndicators(
+    level
+) {
+
+    for (
+        let i = 0;
+        i < levelElements.length;
+        i++
+    ) {
+
+        const element =
+            levelElements[i];
+
+        const color =
+            LEVEL_COLORS[i];
+
+
+        element.style.background =
+            "#130000";
+
+        element.style.borderColor =
+            "#421010";
+
+        element.style.boxShadow =
+            "none";
+
+        element.classList.remove(
+            "active"
+        );
+
+
+        if (
+            i === level - 1
+        ) {
+
+            element.classList.add(
+                "active"
+            );
+
+            element.style.background =
+                color;
+
+            element.style.borderColor =
+                color;
+
+            element.style.boxShadow =
+                "0 0 10px " +
+                color;
+        }
+    }
+}
+
+
+/* ============================================================
+   COUNTDOWN EFFECT
+   ============================================================ */
+
+function startCountdownVisual(
+    targetIndex
+) {
+
+    for (
+        let i = 0;
+        i < levelElements.length;
+        i++
+    ) {
+
+        levelElements[i]
+            .classList.remove(
+                "countdown"
+            );
+    }
+
+
+    const target =
+        levelElements[
+            targetIndex - 1
+        ];
+
+
+    if (target) {
+
+        
+
+        void target.offsetWidth;
+
+        target.classList.add(
+            "countdown"
+        );
+    }
+}
+
+
+/* ============================================================
+   LEVEL TRANSITION
+   ============================================================ */
+
+function requestLevelChange(
+    requestedLevel
+) {
+
+    requestedLevel =
+        Math.max(
+            1,
+            Math.min(
+                7,
+                requestedLevel
+            )
+        );
+
+
+    if (
+        requestedLevel ===
+        currentLevel
+    ) {
+
+        return;
+    }
+
+
+    if (levelChanging) {
+
+        pendingLevel =
+            requestedLevel;
+
+        return;
+    }
+
+
+    pendingLevel =
+        requestedLevel;
+
+    levelChanging = true;
+
+
+
+
+    startCountdownVisual(
+        requestedLevel
+    );
+
+
+
+    clearTimeout(levelTimer);
+
+    levelTimer =
+        setTimeout(
+            function() {
+
+                applyLevel(
+                    pendingLevel
+                );
+
+                levelChanging = false;
+
+            },
+            5000
+        );
+}
+
+
+/* ============================================================
+   APPLY LEVEL
+   ============================================================ */
+
+function applyLevel(level) {
+
+    currentLevel =
+        level;
+
+    slider.value =
+        String(level);
+
+    loadLevelData(
+        currentLevel
+    );
+
+    updateLevelIndicators(
+        currentLevel
+    );
+}
+
+
+/* ============================================================
+   SLIDER HANDLER
+   ============================================================ */
+
+slider.addEventListener(
+    "input",
+    function() {
+
+        const target =
+            Number(
+                slider.value
+            );
+
+
+        requestLevelChange(
+            target
+        );
+
+    },
+    {
+        passive: true
+    }
+);
+
+
+/* ============================================================
+   INITIALIZE LEVEL 1
+   ============================================================ */
+
+applyLevel(1);
+
+
+/* ============================================================
+   ROTATION MATH STATE
+   ============================================================ */
+
+let cosineX = 0;
+let sineX = 0;
+
+let cosineY = 1;
+let sineY = 0;
+
+
+/* ============================================================
+   UPDATE ROTATION MATH
+   ============================================================ */
+
+function updateRotationMath() {
+
+    cosineX =
+        Math.cos(
+            fixedXRotation
+        );
+
+    sineX =
+        Math.sin(
+            fixedXRotation
+        );
+
+    cosineY =
+        Math.cos(
+            rotationY
+        );
+
+    sineY =
+        Math.sin(
+            rotationY
+        );
+}
+
+
+/* ============================================================
+   PROJECT 3D POINTS
+   ============================================================ */
+
+function projectPoints() {
+
+    projectedPoints.length = 0;
+
+
+    const fieldOfView =
+        smallestDimension;
+
+
+    for (
+        let i = 0;
+        i < points.length;
+        i++
+    ) {
+
+        const point =
+            points[i];
+
+
+        let x =
+            point.x;
+
+        let y =
+            point.y;
+
+        let z =
+            point.z;
+
+
+        /* -----------------------------------------------
+           ROTATION X
+           ----------------------------------------------- */
+
+        const rotatedY =
+            y * cosineX -
+            z * sineX;
+
+        const rotatedZ =
+            y * sineX +
+            z * cosineX;
+
+
+        y =
+            rotatedY;
+
+        z =
+            rotatedZ;
+
+
+        /* -----------------------------------------------
+           ROTATION Y
+           ----------------------------------------------- */
+
+        const finalX =
+            x * cosineY -
+            z * sineY;
+
+        const finalZ =
+            x * sineY +
+            z * cosineY;
+
+
+        x =
+            finalX;
+
+        z =
+            finalZ;
+
+
+        /* -----------------------------------------------
+           CAMERA
+           ----------------------------------------------- */
+
+        const depth =
+            z + cameraDistance;
+
+
+        if (
+            depth <= 0.1
+        ) {
+
+            continue;
+        }
+
+
+        /* -----------------------------------------------
+           PERSPECTIVE
+           ----------------------------------------------- */
+
+        const screenX =
+            x *
+            fieldOfView /
+            depth +
+            centerX;
+
+
+        const screenY =
+            y *
+            fieldOfView /
+            depth +
+            centerY;
+
+
+        const radius =
+            Math.max(
+                1.1,
+                fieldOfView /
+                (
+                    depth *
+                    120
+                )
+            );
+
+
+        projectedPoints.push({
+
+            x: screenX,
+
+            y: screenY,
+
+            z: depth,
+
+            radius: radius
+
+        });
+
+    }
+}
+
+
+/* ============================================================
+   DEPTH SORT
+   ============================================================ */
+
+function sortProjectedPoints() {
+
+    projectedPoints.sort(
+        function(a, b) {
+
+            return b.z - a.z;
+
+        }
+    );
+}
+
+
+/* ============================================================
+   CPU STRESS CALCULATION
+   ============================================================ */
+
+function performCpuWork() {
+
+    const config =
+        LEVEL_CONFIG[
+            currentLevel
+        ];
+
+
+    let accumulator = 0;
+
+
+    for (
+        let pass = 0;
+        pass < config.cpuPasses;
+        pass++
+    ) {
+
+        for (
+            let i = 0;
+            i < projectedPoints.length;
+            i++
+        ) {
+
+            const point =
+                projectedPoints[i];
+
+
+            accumulator +=
+                Math.sin(
+                    point.x *
+                    0.001
+                );
+
+
+            accumulator +=
+                Math.cos(
+                    point.y *
+                    0.001
+                );
+
+
+            accumulator +=
+                Math.sqrt(
+                    Math.abs(
+                        point.z
+                    ) + 1
+                );
+
+
+            accumulator +=
+                Math.sin(
+                    point.x *
+                    point.y *
+                    0.000001
+                );
+
+
+            accumulator +=
+                Math.cos(
+                    point.x +
+                    point.y +
+                    point.z
+                );
+
+        }
+    }
+
+
+    
+
+    if (
+        accumulator ===
+        Number.MAX_VALUE
+    ) {
+
+        console.log(
+            accumulator
+        );
+    }
+}
+
+
+/* ============================================================
+   RENDER POINTS
+   ============================================================ */
+
+function renderPoints() {
+
+    const config =
+        LEVEL_CONFIG[
+            currentLevel
+        ];
+
+
+    ctx.fillStyle =
+        "#ffffff";
+
+
+    for (
+        let pass = 0;
+        pass < config.drawPasses;
+        pass++
+    ) {
+
+        for (
+            let i = 0;
+            i < projectedPoints.length;
+            i++
+        ) {
+
+            const point =
+                projectedPoints[i];
+
+
+            ctx.beginPath();
+
+
+            ctx.arc(
+
+                point.x,
+
+                point.y,
+
+                point.radius,
+
+                0,
+
+                Math.PI * 2
+
+            );
+
+
+            ctx.fill();
+
+        }
+    }
+}
+
+
+/* ============================================================
+   BACKGROUND RENDER
+   ============================================================ */
+
+function clearCanvas() {
+
+    ctx.fillStyle =
+        "#000000";
+
+
+    ctx.fillRect(
+
+        0,
+
+        0,
+
+        screenWidth,
+
+        screenHeight
+
+    );
+}
+
+
+/* ============================================================
+   REAL FPS MONITOR
+   ============================================================ */
+
+let fpsFrameCounter = 0;
+
+let fpsStartTime =
+    performance.now();
+
+let measuredFPS = 0;
+
+
+/* ============================================================
+   FPS UPDATE
+========================================================== */
+
+function updateFpsCounter(
+    now
+) {
+
+    fpsFrameCounter =
+        fpsFrameCounter + 1;
+
+
+    const elapsed =
+        now - fpsStartTime;
+
+
+    if (
+        elapsed >= 500
+    ) {
+
+        measuredFPS =
+            Math.round(
+                (
+                    fpsFrameCounter *
+                    1000
+                ) /
+                elapsed
+            );
+
+        fpsElement.textContent =
+            measuredFPS +
+            " FPS";
+
+        fpsFrameCounter = 0;
+
+        fpsStartTime = now;
+
+    }
+  }
+  /* ============================================================
+   AUTO ROTATION SPEED
+   ============================================================ */
+
+const rotationSpeed =
+    0.006;
+
+
+/* ============================================================
+   UPDATE ROTATION ANGLE
+   ============================================================ */
+
+function updateRotationAngle() {
+
+    rotationY =
+        rotationY +
+        rotationSpeed;
+
+
+    if (
+        rotationY >
+        Math.PI * 2
+    ) {
+
+        rotationY =
+            rotationY -
+            Math.PI * 2;
+    }
+  }
+  /* ============================================================
+   MAIN LOOP
+   ============================================================ */
+
+function mainLoop(
+    now
+) {
+
+    updateRotationAngle();
+
+    updateRotationMath();
+
+    projectPoints();
+
+    sortProjectedPoints();
+
+    performCpuWork();
+
+    clearCanvas();
+
+    renderPoints();
+
+    updateFpsCounter(
+        now
+    );
+
+    requestAnimationFrame(
+        mainLoop
+    );
+
+}
+
+
+/* ============================================================
+   START LOOP
+   ============================================================ */
+
+requestAnimationFrame(
+    mainLoop
+);
+
+</script>
+</body>
+</html>
